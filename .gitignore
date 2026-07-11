@@ -1,11 +1,18 @@
 # Environment
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 backend/staticfiles/
+backend/media/
+db.sqlite3
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Node / React Native
 mobile/node_modules/
@@ -23,6 +30,7 @@ mobile/vendor/
 .idea/
 .vscode/
 .DS_Store
+*.log
 
 # Agent
 tracker-app-implementation-plan.md
