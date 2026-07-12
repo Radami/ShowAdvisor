@@ -21,13 +21,22 @@ class Show(models.Model):
     schedule = models.JSONField(null=True, blank=True)
 
     # Cross-reference to external providers (§4.2). Both nullable — a show
-    # may be known to only one provider. Adding e.g. thetvdb_id later is a
-    # purely additive change.
+    # may be known to only one provider — but at least one must be set
+    # (constraint below): a show with no provider ID is an unusable orphan.
+    # Adding e.g. thetvdb_id later is a purely additive change.
     tvmaze_id = models.PositiveIntegerField(null=True, blank=True, unique=True)
     tmdb_id = models.PositiveIntegerField(null=True, blank=True, unique=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tvmaze_id__isnull=False) | models.Q(tmdb_id__isnull=False),
+                name="show_has_provider_id",
+            ),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -44,6 +53,15 @@ class AlternateShowTitle(models.Model):
     title = models.CharField(max_length=500, db_index=True)
     language = models.CharField(max_length=10, blank=True)  # BCP 47 / ISO 639
     country = models.CharField(max_length=2, blank=True)  # ISO 3166-1 alpha-2
+
+    class Meta:
+        constraints = [
+            # Re-syncing AKAs must upsert, never duplicate.
+            models.UniqueConstraint(
+                fields=["show", "title", "language", "country"],
+                name="unique_alternate_show_title",
+            ),
+        ]
 
     def __str__(self):
         return self.title
@@ -73,7 +91,12 @@ class Episode(models.Model):
     episode_number = models.PositiveIntegerField(null=True, blank=True)
     primary_title = models.CharField(max_length=500, blank=True)
     overview = models.TextField(blank=True)  # episode detail view (§3.1)
-    air_date = models.DateField(null=True, blank=True)
+    air_date = models.DateField(null=True, blank=True)  # display
+    # Exact air moment (TVmaze `airstamp`, timezone-aware) — the source of
+    # truth for "has it aired?" (Watching/Up next split, §3.1) and for the
+    # episode-aired notification (§5). air_date alone is ambiguous at the
+    # midnight boundary.
+    airstamp = models.DateTimeField(null=True, blank=True)
     runtime = models.PositiveIntegerField(null=True, blank=True)
     tvmaze_id = models.PositiveIntegerField(null=True, blank=True, unique=True)
 
@@ -102,6 +125,14 @@ class AlternateEpisodeTitle(models.Model):
     language = models.CharField(max_length=10, blank=True)
     country = models.CharField(max_length=2, blank=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["episode", "title", "language", "country"],
+                name="unique_alternate_episode_title",
+            ),
+        ]
+
     def __str__(self):
         return self.title
 
@@ -116,10 +147,22 @@ class Movie(models.Model):
     release_date = models.DateField(null=True, blank=True)
     runtime = models.PositiveIntegerField(null=True, blank=True)
     summary = models.TextField(blank=True)
+    # Nullable column (future providers may not have a TMDB ID) but a check
+    # constraint requires at least one provider ID — currently that means
+    # tmdb_id, TMDB being the only movie source (§4.1). Relaxes to an OR,
+    # like Show's, when another provider is added.
     tmdb_id = models.PositiveIntegerField(null=True, blank=True, unique=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tmdb_id__isnull=False),
+                name="movie_has_provider_id",
+            ),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -132,6 +175,14 @@ class AlternateMovieTitle(models.Model):
     title = models.CharField(max_length=500, db_index=True)
     language = models.CharField(max_length=10, blank=True)
     country = models.CharField(max_length=2, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["movie", "title", "language", "country"],
+                name="unique_alternate_movie_title",
+            ),
+        ]
 
     def __str__(self):
         return self.title
