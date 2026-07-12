@@ -4,14 +4,15 @@ from django.db import models
 
 class User(AbstractUser):
     """
-    Minimal custom user for Milestone 0 (spec §4.4): email, username,
-    created_at. The full field set (is_deleted, deleted_at) comes in
-    Milestone 1. Custom from day one so swapping AUTH_USER_MODEL never
-    requires a painful mid-project migration.
+    Custom user per spec §4.4 (Users & social). is_deleted/deleted_at back
+    the anonymize-and-retain account deletion flow (§5): the row survives
+    deletion with PII scrubbed, so billing records stay attributable.
     """
 
     email = models.EmailField(unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.username
