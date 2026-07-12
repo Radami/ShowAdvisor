@@ -53,6 +53,10 @@ INSTALLED_APPS = [
     "dj_rest_auth.registration",
     # Local
     "accounts",
+    "catalog",
+    "tracking",
+    "notifications",
+    "billing",
 ]
 
 MIDDLEWARE = [
