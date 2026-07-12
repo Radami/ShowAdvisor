@@ -4,7 +4,7 @@ module.exports = {
   // @react-navigation, @react-native-vector-icons, and react-native-screens
   // (all ship untranspiled ESM that jest must run through babel).
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-native-google-signin|@react-native-vector-icons|@react-navigation|react-native-screens)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|@react-native-async-storage|@react-native-google-signin|@react-native-vector-icons|@react-navigation|react-native-screens)/)',
   ],
   // The preset's transform, plus .ttf: @react-native-vector-icons imports its
   // icon font directly, so jest must treat fonts as assets too.
@@ -16,5 +16,6 @@ module.exports = {
   },
   setupFiles: [
     './node_modules/@react-native-google-signin/google-signin/jest/build/jest/setup.js',
+    './jest.setup.js',
   ],
 };

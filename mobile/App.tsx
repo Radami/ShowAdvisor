@@ -7,17 +7,22 @@
  * @format
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
-import { StatusBar, StyleSheet } from 'react-native';
+import { ActivityIndicator, StatusBar, StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Ionicons from '@react-native-vector-icons/ionicons';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { AuthTokens } from './src/api';
-import { AuthProvider } from './src/auth';
+import { AuthProvider, trySilentLogin } from './src/auth';
+import {
+  loadSession,
+  saveSession,
+  LoginProvider,
+  StoredSession,
+} from './src/sessionStore';
 import { GOOGLE_WEB_CLIENT_ID } from './src/config';
 import { RootStackParamList, TabParamList } from './src/navigation';
 import { colors } from './src/theme';
@@ -58,7 +63,9 @@ const tabScreenOptions = ({ route }: { route: { name: keyof TabParamList } }) =>
 
 function Tabs() {
   return (
-    <Tab.Navigator screenOptions={tabScreenOptions}>
+    // Shows opens first (§3.1): the everyday screen is your watch list,
+    // while Search keeps the leftmost slot in the bar.
+    <Tab.Navigator initialRouteName="Shows" screenOptions={tabScreenOptions}>
       <Tab.Screen name="Search" component={SearchScreen} />
       <Tab.Screen name="Shows" component={ShowsScreen} />
       <Tab.Screen name="Movies" component={MoviesScreen} />
@@ -68,17 +75,62 @@ function Tabs() {
 }
 
 function App() {
-  const [tokens, setTokens] = useState<AuthTokens | null>(null);
+  const [session, setSession] = useState<StoredSession | null>(null);
+  // True while the stored session is being restored at launch. A fresh
+  // install (or signed-out state) has nothing stored and always prompts for
+  // a sign-in method — the provider choice is the user's, never inferred
+  // from device state (Milestone 2.2; Facebook/Apple arrive with 2.1).
+  const [restoring, setRestoring] = useState(true);
+  const recovering = useRef(false);
 
   useEffect(() => {
     GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
+    (async () => {
+      setSession(await loadSession());
+      setRestoring(false);
+    })();
   }, []);
+
+  const handleLoggedIn = useCallback((fresh: StoredSession) => {
+    saveSession(fresh);
+    setSession(fresh);
+  }, []);
+
+  // Refresh token rejected mid-session: re-authenticate silently with the
+  // same provider the user signed in with; only if that also fails does the
+  // app drop back to the Login screen.
+  const handleAuthLost = useCallback(async (provider: LoginProvider) => {
+    if (recovering.current) {
+      return; // several requests can 401 together — recover once
+    }
+    recovering.current = true;
+    try {
+      setSession(await trySilentLogin(provider));
+    } finally {
+      recovering.current = false;
+    }
+  }, []);
+
+  if (restoring) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="dark-content" />
+        <SafeAreaView style={styles.loginContainer}>
+          <ActivityIndicator style={styles.restoreSpinner} size="large" />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
-      {tokens ? (
-        <AuthProvider tokens={tokens} onSignedOut={() => setTokens(null)}>
+      {session ? (
+        <AuthProvider
+          session={session}
+          onAuthLost={handleAuthLost}
+          onSignedOut={() => setSession(null)}
+        >
           <NavigationContainer>
             <Stack.Navigator>
               <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
@@ -102,7 +154,7 @@ function App() {
         </AuthProvider>
       ) : (
         <SafeAreaView style={styles.loginContainer}>
-          <LoginScreen onLoggedIn={setTokens} />
+          <LoginScreen onLoggedIn={handleLoggedIn} />
         </SafeAreaView>
       )}
     </SafeAreaProvider>
@@ -111,6 +163,9 @@ function App() {
 
 const styles = StyleSheet.create({
   loginContainer: {
+    flex: 1,
+  },
+  restoreSpinner: {
     flex: 1,
   },
 });

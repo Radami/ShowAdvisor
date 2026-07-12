@@ -127,13 +127,18 @@ export async function loginWithGoogle(idToken: string): Promise<AuthTokens> {
 }
 
 /**
- * Authenticated API client. `onUnauthorized` fires on any 401 (expired
- * access token) so the app can drop back to the Login screen — real token
- * refresh arrives with Milestone 2.2.
+ * Authenticated API client (token refresh: Milestone 2.2). A 401 triggers
+ * one transparent refresh via /api/auth/token/refresh/ and a retry;
+ * `onTokensRefreshed` lets the app persist the rotated pair. Only when the
+ * refresh token itself is rejected does `onUnauthorized` fire and drop the
+ * app back to the Login screen.
  */
 export class Api {
+  private refreshing: Promise<boolean> | null = null;
+
   constructor(
-    private accessToken: string,
+    private tokens: AuthTokens,
+    private onTokensRefreshed: (tokens: AuthTokens) => void,
     private onUnauthorized: () => void,
   ) {}
 
@@ -141,16 +146,20 @@ export class Api {
     path: string,
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
     body?: object,
+    retried = false,
   ): Promise<T> {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${this.tokens.access}`,
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (response.status === 401) {
+      if (!retried && (await this.refresh())) {
+        return this.request(path, method, body, true);
+      }
       this.onUnauthorized();
       throw new ApiError(401, 'Session expired — please sign in again.');
     }
@@ -164,6 +173,36 @@ export class Api {
       return undefined as T;
     }
     return response.json();
+  }
+
+  /** Single-flight: concurrent 401s all await the same refresh call. */
+  private refresh(): Promise<boolean> {
+    this.refreshing ??= (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/token/refresh/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh: this.tokens.refresh }),
+        });
+        if (!response.ok) {
+          return false;
+        }
+        const data = await response.json();
+        // ROTATE_REFRESH_TOKENS is on server-side, so a new refresh token
+        // normally comes back alongside the access token.
+        this.tokens = {
+          access: data.access,
+          refresh: data.refresh ?? this.tokens.refresh,
+        };
+        this.onTokensRefreshed(this.tokens);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.refreshing = null;
+      }
+    })();
+    return this.refreshing;
   }
 
   getProfile(): Promise<Profile> {

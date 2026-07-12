@@ -10,10 +10,11 @@ import {
   GoogleSignin,
   isSuccessResponse,
 } from '@react-native-google-signin/google-signin';
-import { loginWithGoogle, AuthTokens } from '../api';
+import { loginWithGoogle } from '../api';
+import { StoredSession } from '../sessionStore';
 
 interface Props {
-  onLoggedIn: (tokens: AuthTokens) => void;
+  onLoggedIn: (session: StoredSession) => void;
 }
 
 export default function LoginScreen({ onLoggedIn }: Props) {
@@ -33,7 +34,9 @@ export default function LoginScreen({ onLoggedIn }: Props) {
       if (!idToken) {
         throw new Error('Google returned no ID token — check webClientId config');
       }
-      onLoggedIn(await loginWithGoogle(idToken));
+      // The chosen provider is stored with the session — this screen is the
+      // one place the sign-in method gets decided (more providers: task 2.1).
+      onLoggedIn({ provider: 'google', tokens: await loginWithGoogle(idToken) });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
