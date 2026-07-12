@@ -1,12 +1,13 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class WatchedEpisode(models.Model):
     """
-    One row per user+episode (spec §4.4) — boolean semantics, no rewatch
-    tracking in Phase 1: marking watched again has no additional effect.
-    watched_at is set when watched flips to True.
+    One row per user+episode (spec §4.4) — presence semantics: the row's
+    existence means watched, unwatching deletes it. No rewatch tracking in
+    Phase 1: marking watched again has no additional effect.
     """
 
     user = models.ForeignKey(
@@ -15,8 +16,7 @@ class WatchedEpisode(models.Model):
     episode = models.ForeignKey(
         "catalog.Episode", on_delete=models.CASCADE, related_name="watched_by"
     )
-    watched = models.BooleanField(default=True)
-    watched_at = models.DateTimeField(null=True, blank=True)
+    watched_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         constraints = [
@@ -28,7 +28,7 @@ class WatchedEpisode(models.Model):
 
 
 class WatchedMovie(models.Model):
-    """Same unique-per-user+movie, no-rewatch semantics as WatchedEpisode."""
+    """Same presence semantics and unique-per-user+movie as WatchedEpisode."""
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="watched_movies"
@@ -36,8 +36,7 @@ class WatchedMovie(models.Model):
     movie = models.ForeignKey(
         "catalog.Movie", on_delete=models.CASCADE, related_name="watched_by"
     )
-    watched = models.BooleanField(default=True)
-    watched_at = models.DateTimeField(null=True, blank=True)
+    watched_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         constraints = [
@@ -48,6 +47,19 @@ class WatchedMovie(models.Model):
         return f"{self.user} watched {self.movie}"
 
 
+class SubscriptionStatus(models.TextChoices):
+    """
+    active — normal tracking: appears in Watching and Up next, gets
+    release notifications.
+    paused — "watch later": still subscribed and visible in the user's
+    lists, but excluded from Up next queries and from episode-aired /
+    movie-released notifications (spec §3.1, §5).
+    """
+
+    ACTIVE = "active", "Active"
+    PAUSED = "paused", "Paused"
+
+
 class ShowSubscription(models.Model):
     """Drives upcoming-episode tracking and notifications (spec §4.4)."""
 
@@ -56,6 +68,9 @@ class ShowSubscription(models.Model):
     )
     show = models.ForeignKey(
         "catalog.Show", on_delete=models.CASCADE, related_name="subscribers"
+    )
+    status = models.CharField(
+        max_length=10, choices=SubscriptionStatus.choices, default=SubscriptionStatus.ACTIVE
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -79,6 +94,9 @@ class MovieSubscription(models.Model):
     )
     movie = models.ForeignKey(
         "catalog.Movie", on_delete=models.CASCADE, related_name="subscribers"
+    )
+    status = models.CharField(
+        max_length=10, choices=SubscriptionStatus.choices, default=SubscriptionStatus.ACTIVE
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -11,31 +11,31 @@ from .models import (
 
 @admin.register(WatchedEpisode)
 class WatchedEpisodeAdmin(admin.ModelAdmin):
-    list_display = ("user", "episode", "watched", "watched_at")
-    list_filter = ("watched",)
-    search_fields = ("user__username", "episode__title", "episode__season__show__title")
+    list_display = ("user", "episode", "watched_at")
+    search_fields = ("user__username", "episode__primary_title", "episode__season__show__primary_title")
 
 
 @admin.register(WatchedMovie)
 class WatchedMovieAdmin(admin.ModelAdmin):
-    list_display = ("user", "movie", "watched", "watched_at")
-    list_filter = ("watched",)
-    search_fields = ("user__username", "movie__title")
+    list_display = ("user", "movie", "watched_at")
+    search_fields = ("user__username", "movie__primary_title")
 
 
 @admin.register(ShowSubscription)
 class ShowSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("user", "show", "created_at")
-    search_fields = ("user__username", "show__title")
+    list_display = ("user", "show", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "show__primary_title")
 
 
 @admin.register(MovieSubscription)
 class MovieSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("user", "movie", "created_at")
-    search_fields = ("user__username", "movie__title")
+    list_display = ("user", "movie", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = ("user__username", "movie__primary_title")
 
 
 @admin.register(Rating)
 class RatingAdmin(admin.ModelAdmin):
     list_display = ("user", "show", "movie", "value", "updated_at")
-    search_fields = ("user__username", "show__title", "movie__title")
+    search_fields = ("user__username", "show__primary_title", "movie__primary_title")

@@ -10,7 +10,7 @@ class Show(models.Model):
 
     # Canonical/merged fields. All optional: a record can exist with only
     # one provider's data, or with fields blanked after a takedown (§4.7).
-    title = models.CharField(max_length=500)
+    primary_title = models.CharField(max_length=500)
     status = models.CharField(max_length=50, blank=True)  # TVmaze: Running/Ended/TBD/...
     premiered = models.DateField(null=True, blank=True)
     ended = models.DateField(null=True, blank=True)
@@ -30,17 +30,20 @@ class Show(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.title
+        return self.primary_title
 
 
-class ShowTitle(models.Model):
-    """Alternate/foreign-language titles for search (spec §4.6)."""
+class AlternateShowTitle(models.Model):
+    """
+    Alternate/foreign-language titles for search (spec §4.6) — alternates
+    only. The canonical display title lives solely on Show.primary_title;
+    search matches against both.
+    """
 
-    show = models.ForeignKey(Show, on_delete=models.CASCADE, related_name="titles")
+    show = models.ForeignKey(Show, on_delete=models.CASCADE, related_name="alternate_titles")
     title = models.CharField(max_length=500, db_index=True)
     language = models.CharField(max_length=10, blank=True)  # BCP 47 / ISO 639
     country = models.CharField(max_length=2, blank=True)  # ISO 3166-1 alpha-2
-    is_primary = models.BooleanField(default=False)
 
     def __str__(self):
         return self.title
@@ -68,7 +71,7 @@ class Episode(models.Model):
     # Nullable: TVmaze specials have no episode number. The unique constraint
     # below therefore only applies to numbered episodes.
     episode_number = models.PositiveIntegerField(null=True, blank=True)
-    title = models.CharField(max_length=500, blank=True)
+    primary_title = models.CharField(max_length=500, blank=True)
     overview = models.TextField(blank=True)  # episode detail view (§3.1)
     air_date = models.DateField(null=True, blank=True)
     runtime = models.PositiveIntegerField(null=True, blank=True)
@@ -86,7 +89,21 @@ class Episode(models.Model):
 
     def __str__(self):
         number = f"E{self.episode_number}" if self.episode_number else "Special"
-        return f"{self.season} {number} {self.title}".strip()
+        return f"{self.season} {number} {self.primary_title}".strip()
+
+
+class AlternateEpisodeTitle(models.Model):
+    """Same alternates-only pattern as AlternateShowTitle, per episode."""
+
+    episode = models.ForeignKey(
+        Episode, on_delete=models.CASCADE, related_name="alternate_titles"
+    )
+    title = models.CharField(max_length=500, db_index=True)
+    language = models.CharField(max_length=10, blank=True)
+    country = models.CharField(max_length=2, blank=True)
+
+    def __str__(self):
+        return self.title
 
 
 class Movie(models.Model):
@@ -95,7 +112,7 @@ class Movie(models.Model):
     (§4.1) — tvmaze has no movies; TheTVDB deferred (§9).
     """
 
-    title = models.CharField(max_length=500)
+    primary_title = models.CharField(max_length=500)
     release_date = models.DateField(null=True, blank=True)
     runtime = models.PositiveIntegerField(null=True, blank=True)
     summary = models.TextField(blank=True)
@@ -105,17 +122,16 @@ class Movie(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.title
+        return self.primary_title
 
 
-class MovieTitle(models.Model):
-    """Alternate-title pattern of ShowTitle, for movie search (spec §4.4)."""
+class AlternateMovieTitle(models.Model):
+    """Alternate-title pattern of AlternateShowTitle, for movie search."""
 
-    movie = models.ForeignKey(Movie, on_delete=models.CASCADE, related_name="titles")
+    movie = models.ForeignKey(Movie, on_delete=models.CASCADE, related_name="alternate_titles")
     title = models.CharField(max_length=500, db_index=True)
     language = models.CharField(max_length=10, blank=True)
     country = models.CharField(max_length=2, blank=True)
-    is_primary = models.BooleanField(default=False)
 
     def __str__(self):
         return self.title
