@@ -1,3 +1,4 @@
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 
 
@@ -37,6 +38,10 @@ class Show(models.Model):
                 name="show_has_provider_id",
             ),
         ]
+        indexes = [
+            # pg_trgm fuzzy search across primary + alternate titles (§4.6).
+            GinIndex(fields=["primary_title"], name="show_title_trgm", opclasses=["gin_trgm_ops"]),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -61,6 +66,9 @@ class AlternateShowTitle(models.Model):
                 fields=["show", "title", "language", "country"],
                 name="unique_alternate_show_title",
             ),
+        ]
+        indexes = [
+            GinIndex(fields=["title"], name="alt_show_title_trgm", opclasses=["gin_trgm_ops"]),
         ]
 
     def __str__(self):
@@ -163,6 +171,9 @@ class Movie(models.Model):
                 name="movie_has_provider_id",
             ),
         ]
+        indexes = [
+            GinIndex(fields=["primary_title"], name="movie_title_trgm", opclasses=["gin_trgm_ops"]),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -182,6 +193,9 @@ class AlternateMovieTitle(models.Model):
                 fields=["movie", "title", "language", "country"],
                 name="unique_alternate_movie_title",
             ),
+        ]
+        indexes = [
+            GinIndex(fields=["title"], name="alt_movie_title_trgm", opclasses=["gin_trgm_ops"]),
         ]
 
     def __str__(self):

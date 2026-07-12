@@ -36,6 +36,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
