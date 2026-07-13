@@ -6,7 +6,7 @@ either a v3 API key or a v4 read access token (the long "eyJ..." JWT).
 
 from django.conf import settings
 
-from .base import ProviderClient
+from .base import ProviderClient, RetryPolicy
 
 
 class TMDBNotConfigured(Exception):
@@ -19,8 +19,8 @@ class TMDBClient(ProviderClient):
     # pace plus the base client's 429 backoff is plenty.
     request_interval = 0.05
 
-    def __init__(self, api_key=None):
-        super().__init__()
+    def __init__(self, api_key=None, retry_policy=RetryPolicy.INTERACTIVE):
+        super().__init__(retry_policy=retry_policy)
         self.api_key = api_key if api_key is not None else settings.TMDB_API_KEY
 
     @property

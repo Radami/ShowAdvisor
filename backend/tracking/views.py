@@ -18,6 +18,7 @@ from .models import (
 from .queries import episode_aired_q, episode_unaired_q
 
 HISTORY_DEFAULT_LIMIT = 100
+HISTORY_MAX_LIMIT = 500
 
 
 # --- Task 5.1: mark watched / unwatched (presence semantics, spec §4.4) ----
@@ -41,10 +42,12 @@ class SeasonWatchedView(APIView):
 
     def post(self, request, pk):
         season = get_object_or_404(Season, pk=pk)
+        # Aired episodes only — you can't have watched the future, and
+        # marking it would silently drain Up next as episodes air.
         WatchedEpisode.objects.bulk_create(
             [
                 WatchedEpisode(user=request.user, episode=episode)
-                for episode in season.episodes.all()
+                for episode in season.episodes.filter(episode_aired_q())
             ],
             ignore_conflicts=True,  # already-watched episodes stay as they are
         )
@@ -224,8 +227,12 @@ class MyMoviesView(APIView):
             if subscription.status == SubscriptionStatus.PAUSED:
                 paused.append(item)
                 continue
-            if movie.id not in watched_ids:
-                watch_list.append(item)
+
+            # Watched movies drop out of both buckets — Watch History is
+            # the only place they remain visible (§3.1).
+            if movie.id in watched_ids:
+                continue
+            watch_list.append(item)
             if not movie.release_date or movie.release_date > today:
                 up_next.append(item)
         return Response({"watch_list": watch_list, "up_next": up_next, "paused": paused})
@@ -239,9 +246,14 @@ class WatchHistoryView(APIView):
 
     def get(self, request):
         try:
-            limit = min(int(request.query_params.get("limit", HISTORY_DEFAULT_LIMIT)), 500)
+            limit = int(request.query_params.get("limit", HISTORY_DEFAULT_LIMIT))
         except ValueError:
-            return Response({"detail": "?limit= must be a number."}, status=400)
+            return Response(
+                {"detail": "?limit= must be a number."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        # Clamp rather than error: a negative value would make the queryset
+        # slice below raise, turning bad input into a 500.
+        limit = min(max(limit, 0), HISTORY_MAX_LIMIT)
 
         episodes = (
             WatchedEpisode.objects.filter(user=request.user)

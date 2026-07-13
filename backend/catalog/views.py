@@ -13,7 +13,7 @@ from .serializers import (
     ShowDetailSerializer,
     ShowSearchResultSerializer,
 )
-from .sync import ensure_movie_detail, ensure_show_detail, on_demand_fetch
+from .sync import ensure_movie_detail, ensure_show_detail, fetch_movies_on_demand, fetch_shows_on_demand
 
 
 class SearchView(APIView):
@@ -31,11 +31,17 @@ class SearchView(APIView):
         if year and not year.isdigit():
             return Response({"detail": "?year= must be a number."}, status=400)
 
+        # Tier 3 falls back per medium: a local show hit must not suppress
+        # the movie fetch, or vice versa ("Dune" the show would otherwise
+        # permanently hide Dune the movies).
         shows = search_shows(query, year)
-        movies = search_movies(query, year)
-        if not shows and not movies:
-            on_demand_fetch(query, year)
+        if not shows:
+            fetch_shows_on_demand(query)
             shows = search_shows(query, year)
+
+        movies = search_movies(query, year)
+        if not movies:
+            fetch_movies_on_demand(query, year)
             movies = search_movies(query, year)
 
         # Interleave shows and movies by match quality.

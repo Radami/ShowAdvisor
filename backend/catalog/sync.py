@@ -12,7 +12,7 @@ takedown procedure (§4.7) a purge-and-recompute.
 import logging
 import re
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
@@ -32,6 +32,9 @@ from .providers import TMDBClient, TMDBNotConfigured, TVmazeClient, TVmazeNotFou
 logger = logging.getLogger(__name__)
 
 TAG_RE = re.compile(r"<[^>]+>")
+
+# How many provider search hits a Tier 3 on-demand fetch upserts (§4.5).
+ON_DEMAND_FETCH_LIMIT = 10
 
 
 def strip_html(text):
@@ -119,13 +122,22 @@ def upsert_show_from_tvmaze(payload):
     show, _ = Show.objects.get_or_create(
         tvmaze_id=payload["id"], defaults={"primary_title": payload.get("name") or ""}
     )
+
+    # Never let a show-level payload (index page, search hit) clobber the
+    # `_embedded` seasons/episodes of a full-detail snapshot — it also
+    # serves as ensure_show_detail's "detail already fetched" marker. The
+    # show-level fields still refresh from the newer payload.
+    embedded = payload.get("_embedded") or {}
+    existing = _cache_data(show, "tvmaze_cache")
+    if "_embedded" in existing and "_embedded" not in payload:
+        payload = {**payload, "_embedded": existing["_embedded"]}
+
     TVmazeShowCache.objects.update_or_create(
         show=show, defaults={"data": payload, "fetched_at": timezone.now()}
     )
     show.refresh_from_db()
     recompute_show(show)
 
-    embedded = payload.get("_embedded") or {}
     if embedded.get("episodes") or embedded.get("seasons"):
         _sync_seasons_and_episodes(show, embedded)
     return show
@@ -134,12 +146,20 @@ def upsert_show_from_tvmaze(payload):
 def _sync_seasons_and_episodes(show, embedded):
     seasons_by_number = {}
     for raw in embedded.get("seasons", []):
+        # A renumbered season would leave its TVmaze ID on the old row —
+        # release it first so the number-keyed upsert can't trip the unique
+        # index. The old row keeps its number; rows are never deleted (§4.7).
+        Season.objects.filter(tvmaze_id=raw["id"]).exclude(
+            show=show, season_number=raw["number"]
+        ).update(tvmaze_id=None)
         season, _ = Season.objects.update_or_create(
             show=show, season_number=raw["number"], defaults={"tvmaze_id": raw["id"]}
         )
         seasons_by_number[raw["number"]] = season
 
-    for raw in embedded.get("episodes", []):
+    episodes = embedded.get("episodes", [])
+    _release_renumbered_episode_slots(show, episodes)
+    for raw in episodes:
         season = seasons_by_number.get(raw["season"])
         if season is None:
             season, _ = Season.objects.get_or_create(show=show, season_number=raw["season"])
@@ -156,6 +176,37 @@ def _sync_seasons_and_episodes(show, embedded):
                 "runtime": raw.get("runtime"),
             },
         )
+
+
+def _release_renumbered_episode_slots(show, episodes):
+    """
+    TVmaze renumbers episodes (and moves them across seasons). Blank the
+    episode_number of every row that no longer matches the incoming numbering
+    before the upsert loop, so in-place shifts and swaps can't trip
+    unique_numbered_episode_per_season — the constraint exempts NULLs. The
+    rows themselves survive (watched history cascades on delete, §4.4).
+    """
+    targets = {raw["id"]: (raw["season"], raw.get("number")) for raw in episodes}
+    claimed = {
+        (raw["season"], raw.get("number")) for raw in episodes if raw.get("number") is not None
+    }
+
+    stale_ids = []
+    numbered = Episode.objects.filter(
+        season__show=show, episode_number__isnull=False
+    ).select_related("season")
+    for episode in numbered:
+        current = (episode.season.season_number, episode.episode_number)
+        target = targets.get(episode.tvmaze_id)
+        if target == current:
+            continue
+        # Moving in the incoming payload, or squatting on a slot the payload
+        # assigns to a different episode — either way the number must go.
+        if target is not None or current in claimed:
+            stale_ids.append(episode.id)
+
+    if stale_ids:
+        Episode.objects.filter(id__in=stale_ids).update(episode_number=None)
 
 
 def _sync_show_akas(show, akas):
@@ -188,9 +239,12 @@ def fetch_show_full(show):
 def ensure_show_detail(show):
     """
     Make sure a show has its full detail (episodes) before it's displayed —
-    Tier 1 seeds and Tier 3 search hits are show-level only.
+    Tier 1 seeds and Tier 3 search hits are show-level only. "Already
+    fetched" is the `_embedded` marker in the cache snapshot, not the
+    presence of episodes: a legitimately episode-less show (just announced)
+    must not re-trigger a synchronous provider fetch on every view.
     """
-    if show.tvmaze_id and not show.seasons.exists():
+    if show.tvmaze_id and "_embedded" not in _cache_data(show, "tvmaze_cache"):
         try:
             return fetch_show_full(show)
         except Exception:
@@ -217,10 +271,14 @@ def enhance_show_from_tmdb(show):
         tmdb_id = show.tmdb_id or _resolve_show_tmdb_id(client, show)
         if not tmdb_id:
             return show
+
+        # The resolved ID must be ours before anything is cached: enhancing
+        # this show with a payload whose ID belongs to another Show record
+        # would corrupt both (§4.2 — cross-reference IDs are ours).
+        if show.tmdb_id != tmdb_id and not _claim_show_tmdb_id(show, tmdb_id):
+            return show
+
         data = client.tv_details(tmdb_id)
-        if show.tmdb_id != tmdb_id and not Show.objects.filter(tmdb_id=tmdb_id).exists():
-            show.tmdb_id = tmdb_id
-            show.save(update_fields=["tmdb_id"])
         TMDBShowCache.objects.update_or_create(
             show=show, defaults={"data": data, "fetched_at": timezone.now()}
         )
@@ -234,6 +292,23 @@ def enhance_show_from_tmdb(show):
     except Exception:
         logger.exception("TMDB enhancement failed for show %s", show.pk)
     return show
+
+
+def _claim_show_tmdb_id(show, tmdb_id):
+    """
+    Take ownership of a TMDB ID, relying on the unique constraint instead of
+    a racy exists()-then-save check. False means another Show record already
+    owns it (or won a concurrent claim) — the caller must not enhance.
+    """
+    original = show.tmdb_id
+    show.tmdb_id = tmdb_id
+    try:
+        with transaction.atomic():
+            show.save(update_fields=["tmdb_id"])
+        return True
+    except IntegrityError:
+        show.tmdb_id = original
+        return False
 
 
 def _resolve_show_tmdb_id(client, show):
@@ -304,23 +379,36 @@ def ensure_movie_detail(movie):
 # --- Tier 3: on-demand fetch on search miss (task 3.3, §4.5) ---------------
 
 
-def on_demand_fetch(query, year=None, limit=10):
+def fetch_shows_on_demand(query, limit=ON_DEMAND_FETCH_LIMIT):
     """
-    Live provider search when the local DB has no match (§4.6). Caches
+    Live TVmaze search when the local DB has no show match (§4.6). Caches
     everything fetched so future searches hit locally. Provider failures are
     logged, not raised — a search must degrade, not 500.
     """
     try:
-        for hit in TVmazeClient().search_shows(query)[:limit]:
-            upsert_show_from_tvmaze(hit["show"])
+        client = TVmazeClient()
+        for hit in client.search_shows(query)[:limit]:
+            show = upsert_show_from_tvmaze(hit["show"])
+
+            # AKAs are what let the local re-query match the alias the user
+            # actually typed — TVmaze finds "La Casa de Papel" as Money
+            # Heist; without its AKAs our trigram search wouldn't.
+            try:
+                _sync_show_akas(show, client.show_akas(show.tvmaze_id))
+            except TVmazeNotFound:
+                pass
     except Exception:
         logger.exception("Tier 3 TVmaze fetch failed for %r", query)
 
-    tmdb = TMDBClient()
-    if tmdb.is_configured:
-        try:
-            results = tmdb.search_movies(query, year=year).get("results") or []
-            for payload in results[:limit]:
-                upsert_movie_from_tmdb(payload)
-        except Exception:
-            logger.exception("Tier 3 TMDB fetch failed for %r", query)
+
+def fetch_movies_on_demand(query, year=None, limit=ON_DEMAND_FETCH_LIMIT):
+    """TMDB counterpart of fetch_shows_on_demand, for movies (§4.6)."""
+    client = TMDBClient()
+    if not client.is_configured:
+        return
+    try:
+        results = client.search_movies(query, year=year).get("results") or []
+        for payload in results[:limit]:
+            upsert_movie_from_tmdb(payload)
+    except Exception:
+        logger.exception("Tier 3 TMDB fetch failed for %r", query)

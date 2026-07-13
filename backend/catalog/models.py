@@ -202,6 +202,24 @@ class AlternateMovieTitle(models.Model):
         return self.title
 
 
+class SyncState(models.Model):
+    """
+    Durable progress markers for the sync tasks (spec §4.5) — e.g. the next
+    TVmaze index page for the Tier 1 seed, later the Tier 2 delta-sync
+    watermark. A dedicated table rather than something inferred from catalog
+    rows: Tier 3 on-demand fetches insert shows with arbitrary provider IDs,
+    so catalog contents say nothing about how far a seed walk actually got.
+    Deleting a row is safe — the task restarts from the beginning.
+    """
+
+    key = models.CharField(max_length=100, unique=True)
+    value = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key} = {self.value}"
+
+
 class ProviderCache(models.Model):
     """
     Base for the raw provider caches (spec §4.4, §4.7). One current snapshot
