@@ -25,7 +25,10 @@ services:
       retries: 10
 
   web:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        INSTALL_DEV: "true"
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app
