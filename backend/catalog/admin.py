@@ -73,22 +73,22 @@ class MovieAdmin(admin.ModelAdmin):
 
 @admin.register(AlternateEpisodeTitle)
 class AlternateEpisodeTitleAdmin(admin.ModelAdmin):
-    list_display = ("title", "episode", "language", "country")
-    list_filter = ("language",)
+    list_display = ("title", "episode", "country")
+    list_filter = ("country",)
     search_fields = ("title", "episode__primary_title")
 
 
 @admin.register(AlternateShowTitle)
 class AlternateShowTitleAdmin(admin.ModelAdmin):
-    list_display = ("title", "show", "language", "country")
-    list_filter = ("language",)
+    list_display = ("title", "show", "country")
+    list_filter = ("country",)
     search_fields = ("title", "show__primary_title")
 
 
 @admin.register(AlternateMovieTitle)
 class AlternateMovieTitleAdmin(admin.ModelAdmin):
-    list_display = ("title", "movie", "language", "country")
-    list_filter = ("language",)
+    list_display = ("title", "movie", "country")
+    list_filter = ("country",)
     search_fields = ("title", "movie__primary_title")
 
 

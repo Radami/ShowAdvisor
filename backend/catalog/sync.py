@@ -216,7 +216,7 @@ def _sync_show_akas(show, akas):
             continue
         country = ((aka.get("country") or {}).get("code") or "")[:2]
         AlternateShowTitle.objects.get_or_create(
-            show=show, title=title[:500], language="", country=country
+            show=show, title=title[:500], country=country
         )
 
 
@@ -329,7 +329,6 @@ def _sync_tmdb_alternate_titles(entity, data, title_model, fk_name):
         title_model.objects.get_or_create(
             **{fk_name: entity},
             title=title[:500],
-            language="",
             country=(alt.get("iso_3166_1") or "")[:2],
         )
 
