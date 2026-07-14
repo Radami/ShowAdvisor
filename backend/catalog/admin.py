@@ -106,5 +106,6 @@ class TMDBShowCacheAdmin(admin.ModelAdmin):
 
 @admin.register(TMDBMovieCache)
 class TMDBMovieCacheAdmin(admin.ModelAdmin):
-    list_display = ("movie", "fetched_at")
+    list_display = ("movie", "fetched_at", "is_detail")
+    list_filter = ("is_detail",)
     search_fields = ("movie__primary_title",)

@@ -11,6 +11,7 @@ takedown procedure (§4.7) a purge-and-recompute.
 
 import logging
 import re
+from enum import Enum
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -35,6 +36,17 @@ TAG_RE = re.compile(r"<[^>]+>")
 
 # How many provider search hits a Tier 3 on-demand fetch upserts (§4.5).
 ON_DEMAND_FETCH_LIMIT = 10
+
+
+class TMDBPayloadKind(Enum):
+    """
+    Provenance of a raw TMDB movie payload, declared by the caller (who
+    knows which endpoint it hit). Search hits are partial — no runtime, no
+    alternate titles — so they must never overwrite a full-detail snapshot.
+    """
+
+    SEARCH_HIT = "search_hit"
+    DETAIL = "detail"
 
 
 def strip_html(text):
@@ -337,20 +349,28 @@ def _sync_tmdb_alternate_titles(entity, data, title_model, fk_name):
 
 
 @transaction.atomic
-def upsert_movie_from_tmdb(payload):
+def upsert_movie_from_tmdb(payload, kind):
     """
-    Create/update a Movie from a raw TMDB movie payload (search hit or full
-    detail). Same snapshot-overwrite + recompute pattern as shows.
+    Create/update a Movie from a raw TMDB movie payload, whose shape the
+    caller declares via `kind` (TMDBPayloadKind). Same snapshot-overwrite +
+    recompute pattern as shows.
     """
     movie, _ = Movie.objects.get_or_create(
         tmdb_id=payload["id"], defaults={"primary_title": payload.get("title") or ""}
     )
-    existing = _cache_data(movie, "tmdb_cache")
+
     # Never let a partial search-hit payload clobber a full-detail snapshot.
-    if "runtime" in existing and "runtime" not in payload:
+    cache = getattr(movie, "tmdb_cache", None)
+    if kind is TMDBPayloadKind.SEARCH_HIT and cache is not None and cache.is_detail:
         return movie
+
     TMDBMovieCache.objects.update_or_create(
-        movie=movie, defaults={"data": payload, "fetched_at": timezone.now()}
+        movie=movie,
+        defaults={
+            "data": payload,
+            "fetched_at": timezone.now(),
+            "is_detail": kind is TMDBPayloadKind.DETAIL,
+        },
     )
     movie.refresh_from_db()
     recompute_movie(movie)
@@ -363,13 +383,16 @@ def ensure_movie_detail(movie):
     Search hits from TMDB are partial (no runtime/alternate titles) — fetch
     the full record before the movie is displayed.
     """
-    if "runtime" in _cache_data(movie, "tmdb_cache"):
+    cache = getattr(movie, "tmdb_cache", None)
+    if cache is not None and cache.is_detail:
         return movie
     client = TMDBClient()
     if not client.is_configured or not movie.tmdb_id:
         return movie
     try:
-        return upsert_movie_from_tmdb(client.movie_details(movie.tmdb_id))
+        return upsert_movie_from_tmdb(
+            client.movie_details(movie.tmdb_id), TMDBPayloadKind.DETAIL
+        )
     except Exception:
         logger.exception("Full-detail fetch failed for movie %s", movie.pk)
         return movie
@@ -408,6 +431,6 @@ def fetch_movies_on_demand(query, year=None, limit=ON_DEMAND_FETCH_LIMIT):
     try:
         results = client.search_movies(query, year=year).get("results") or []
         for payload in results[:limit]:
-            upsert_movie_from_tmdb(payload)
+            upsert_movie_from_tmdb(payload, TMDBPayloadKind.SEARCH_HIT)
     except Exception:
         logger.exception("Tier 3 TMDB fetch failed for %r", query)

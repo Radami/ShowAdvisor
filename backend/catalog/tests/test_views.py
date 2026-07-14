@@ -11,7 +11,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from catalog.models import Movie, Show
-from catalog.sync import upsert_movie_from_tmdb, upsert_show_from_tvmaze
+from catalog.sync import TMDBPayloadKind, upsert_movie_from_tmdb, upsert_show_from_tvmaze
 from tracking.models import ShowSubscription, WatchedEpisode, WatchedMovie
 
 from .payloads import tmdb_movie, tvmaze_show, tvmaze_show_full
@@ -57,7 +57,7 @@ class TestSearchView:
         assert response.data["results"][0]["title"] == "Dune"
 
     def test_local_movie_hit_still_fetches_shows(self, api_client, show_fetch, movie_fetch):
-        upsert_movie_from_tmdb(tmdb_movie(title="Dune"))
+        upsert_movie_from_tmdb(tmdb_movie(title="Dune"), TMDBPayloadKind.DETAIL)
 
         api_client.get("/api/search/", {"q": "Dune"})
 
@@ -66,7 +66,9 @@ class TestSearchView:
 
     def test_full_miss_fetches_both_and_requeries(self, api_client, show_fetch, movie_fetch):
         show_fetch.side_effect = lambda q: upsert_show_from_tvmaze(tvmaze_show(name="Dune"))
-        movie_fetch.side_effect = lambda q, y: upsert_movie_from_tmdb(tmdb_movie(title="Dune: Part Two"))
+        movie_fetch.side_effect = lambda q, y: upsert_movie_from_tmdb(
+            tmdb_movie(title="Dune: Part Two"), TMDBPayloadKind.DETAIL
+        )
 
         response = api_client.get("/api/search/", {"q": "Dune"})
 
@@ -75,7 +77,7 @@ class TestSearchView:
 
     def test_results_interleaved_by_similarity(self, api_client, show_fetch, movie_fetch):
         upsert_show_from_tvmaze(tvmaze_show(name="Dune"))
-        upsert_movie_from_tmdb(tmdb_movie(title="Dune: Part Two"))
+        upsert_movie_from_tmdb(tmdb_movie(title="Dune: Part Two"), TMDBPayloadKind.DETAIL)
 
         results = api_client.get("/api/search/", {"q": "Dune"}).data["results"]
 
@@ -120,7 +122,7 @@ class TestMovieDetailView:
         monkeypatch.setattr("catalog.views.ensure_movie_detail", lambda movie: movie)
 
     def test_detail_payload(self, api_client, user):
-        movie = upsert_movie_from_tmdb(tmdb_movie())
+        movie = upsert_movie_from_tmdb(tmdb_movie(), TMDBPayloadKind.DETAIL)
         WatchedMovie.objects.create(user=user, movie=movie)
 
         data = api_client.get(f"/api/movies/{movie.pk}/").data

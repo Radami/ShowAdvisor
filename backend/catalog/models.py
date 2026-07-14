@@ -248,6 +248,10 @@ class TMDBShowCache(ProviderCache):
 
 class TMDBMovieCache(ProviderCache):
     movie = models.OneToOneField(Movie, on_delete=models.CASCADE, related_name="tmdb_cache")
+    # TMDB movie payloads come in two shapes: partial search hits and full
+    # /movie/{id} records. Set from the caller's declared payload kind; a
+    # partial snapshot must never overwrite a row where this is True.
+    is_detail = models.BooleanField(default=False)
 
     def __str__(self):
         return f"TMDB cache for {self.movie}"
