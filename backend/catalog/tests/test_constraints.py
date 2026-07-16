@@ -42,7 +42,7 @@ class TestCatalogConstraints:
 
     def test_alternate_title_tuple_unique(self):
         show = _show()
-        aka = {"show": show, "title": "Alt", "language": "", "country": "US"}
+        aka = {"show": show, "title": "Alt", "country": "US"}
         AlternateShowTitle.objects.create(**aka)
         with pytest.raises(IntegrityError):
             AlternateShowTitle.objects.create(**aka)

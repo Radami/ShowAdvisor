@@ -13,6 +13,7 @@ from catalog.models import Movie, Show, TMDBShowCache
 from catalog.providers import TVmazeNotFound
 from catalog.sync import (
     ON_DEMAND_FETCH_LIMIT,
+    TMDBPayloadKind,
     _claim_show_tmdb_id,
     enhance_show_from_tmdb,
     ensure_movie_detail,
@@ -162,14 +163,14 @@ class TestEnhanceShowFromTmdb:
 
 class TestEnsureMovieDetail:
     def test_full_snapshot_skips_provider_entirely(self, tmdb_client):
-        movie = upsert_movie_from_tmdb(tmdb_movie())
+        movie = upsert_movie_from_tmdb(tmdb_movie(), TMDBPayloadKind.DETAIL)
 
         ensure_movie_detail(movie)
 
         tmdb_client.movie_details.assert_not_called()
 
     def test_stub_movie_fetches_full_detail(self, tmdb_client):
-        movie = upsert_movie_from_tmdb(tmdb_movie_search_hit())
+        movie = upsert_movie_from_tmdb(tmdb_movie_search_hit(), TMDBPayloadKind.SEARCH_HIT)
         tmdb_client.movie_details.return_value = tmdb_movie()
 
         movie = ensure_movie_detail(movie)
@@ -177,7 +178,7 @@ class TestEnsureMovieDetail:
         assert movie.runtime == 167
 
     def test_fetch_failure_returns_stub(self, tmdb_client):
-        movie = upsert_movie_from_tmdb(tmdb_movie_search_hit())
+        movie = upsert_movie_from_tmdb(tmdb_movie_search_hit(), TMDBPayloadKind.SEARCH_HIT)
         tmdb_client.movie_details.side_effect = RuntimeError
 
         assert ensure_movie_detail(movie).runtime is None

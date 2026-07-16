@@ -44,7 +44,7 @@ class TestBackoff:
 
         assert FakeClient().get("/thing") == {"ok": True}
         assert len(responses.calls) == 2
-        assert sleeps == [1.0]
+        assert sleeps == pytest.approx([1.0], abs=0.05)
 
     @responses.activate
     def test_interactive_policy_gives_up_quickly(self, sleeps):
@@ -55,8 +55,9 @@ class TestBackoff:
             FakeClient().get("/thing")
 
         assert len(responses.calls) == RetryPolicy.INTERACTIVE.max_attempts
-        # Backoff between attempts only — no pointless sleep after the last.
-        assert sleeps == [1.0, 2.0]
+        # Backoff between attempts only — the final 429's backoff is not
+        # slept here; it carries over as the pacing horizon (see below).
+        assert sleeps == pytest.approx([1.0, 2.0], abs=0.05)
 
     @responses.activate
     def test_background_policy_waits_out_longer_windows(self, sleeps):
@@ -67,7 +68,25 @@ class TestBackoff:
             FakeClient(retry_policy=RetryPolicy.BACKGROUND).get("/thing")
 
         assert len(responses.calls) == RetryPolicy.BACKGROUND.max_attempts
-        assert sleeps == [1.0, 2.0, 4.0, 8.0]
+        assert sleeps == pytest.approx([1.0, 2.0, 4.0, 8.0], abs=0.05)
+
+    @responses.activate
+    def test_final_429_backoff_carries_to_next_call(self, sleeps):
+        for _ in range(RetryPolicy.INTERACTIVE.max_attempts):
+            responses.get(f"{FAKE_BASE}/thing", status=429)
+        responses.get(f"{FAKE_BASE}/thing", json={"ok": True})
+
+        # Exhaust retries: the provider told us to slow down, so the last
+        # backoff becomes the pacing horizon for this client's next request.
+        client = FakeClient()
+        with pytest.raises(requests.HTTPError):
+            client.get("/thing")
+        sleeps.clear()
+
+        assert client.get("/thing") == {"ok": True}
+        assert sleeps == pytest.approx(
+            [RetryPolicy.INTERACTIVE.max_backoff_seconds], abs=0.05
+        )
 
     @responses.activate
     def test_non_429_errors_are_not_retried(self, sleeps):

@@ -49,12 +49,12 @@ class ProviderClient:
     def __init__(self, retry_policy=RetryPolicy.INTERACTIVE):
         self.retry_policy = retry_policy
         self._session = requests.Session()
-        self._last_request_at = 0.0
+        # Earliest moment the next request may be sent. Both the per-client
+        # interval and 429 backoff express themselves by pushing this forward.
+        self._next_request_at = 0.0
 
     def _pace(self):
-        if self.request_interval <= 0:
-            return
-        wait = self._last_request_at + self.request_interval - time.monotonic()
+        wait = self._next_request_at - time.monotonic()
         if wait > 0:
             time.sleep(wait)
 
@@ -67,18 +67,20 @@ class ProviderClient:
             response = self._session.get(
                 url, params=params, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS
             )
-            self._last_request_at = time.monotonic()
+            self._next_request_at = time.monotonic() + self.request_interval
+
             if response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
                 response.raise_for_status()
                 return response.json()
 
-            # Out of attempts — no point sleeping before surfacing the 429.
-            if attempt + 1 == self.retry_policy.max_attempts:
-                break
+            # Push the pacing horizon out instead of sleeping here; the next
+            # iteration's _pace() serves the delay. On the last attempt the
+            # horizon simply carries over to this client's next call.
             delay = min(backoff, self.retry_policy.max_backoff_seconds)
             logger.warning(
                 "429 from %s (attempt %s), backing off %.1fs", url, attempt + 1, delay
             )
-            time.sleep(delay)
+            self._next_request_at = time.monotonic() + delay
             backoff *= 2
+
         response.raise_for_status()  # surface the final 429

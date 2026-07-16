@@ -56,14 +56,13 @@ class AlternateShowTitle(models.Model):
 
     show = models.ForeignKey(Show, on_delete=models.CASCADE, related_name="alternate_titles")
     title = models.CharField(max_length=500, db_index=True)
-    language = models.CharField(max_length=10, blank=True)  # BCP 47 / ISO 639
     country = models.CharField(max_length=2, blank=True)  # ISO 3166-1 alpha-2
 
     class Meta:
         constraints = [
             # Re-syncing AKAs must upsert, never duplicate.
             models.UniqueConstraint(
-                fields=["show", "title", "language", "country"],
+                fields=["show", "title", "country"],
                 name="unique_alternate_show_title",
             ),
         ]
@@ -130,13 +129,12 @@ class AlternateEpisodeTitle(models.Model):
         Episode, on_delete=models.CASCADE, related_name="alternate_titles"
     )
     title = models.CharField(max_length=500, db_index=True)
-    language = models.CharField(max_length=10, blank=True)
     country = models.CharField(max_length=2, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["episode", "title", "language", "country"],
+                fields=["episode", "title", "country"],
                 name="unique_alternate_episode_title",
             ),
         ]
@@ -184,13 +182,12 @@ class AlternateMovieTitle(models.Model):
 
     movie = models.ForeignKey(Movie, on_delete=models.CASCADE, related_name="alternate_titles")
     title = models.CharField(max_length=500, db_index=True)
-    language = models.CharField(max_length=10, blank=True)
     country = models.CharField(max_length=2, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["movie", "title", "language", "country"],
+                fields=["movie", "title", "country"],
                 name="unique_alternate_movie_title",
             ),
         ]
@@ -251,6 +248,10 @@ class TMDBShowCache(ProviderCache):
 
 class TMDBMovieCache(ProviderCache):
     movie = models.OneToOneField(Movie, on_delete=models.CASCADE, related_name="tmdb_cache")
+    # TMDB movie payloads come in two shapes: partial search hits and full
+    # /movie/{id} records. Set from the caller's declared payload kind; a
+    # partial snapshot must never overwrite a row where this is True.
+    is_detail = models.BooleanField(default=False)
 
     def __str__(self):
         return f"TMDB cache for {self.movie}"
