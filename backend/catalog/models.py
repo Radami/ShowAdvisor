@@ -1,3 +1,4 @@
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 
 
@@ -37,6 +38,10 @@ class Show(models.Model):
                 name="show_has_provider_id",
             ),
         ]
+        indexes = [
+            # pg_trgm fuzzy search across primary + alternate titles (§4.6).
+            GinIndex(fields=["primary_title"], name="show_title_trgm", opclasses=["gin_trgm_ops"]),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -61,6 +66,9 @@ class AlternateShowTitle(models.Model):
                 fields=["show", "title", "language", "country"],
                 name="unique_alternate_show_title",
             ),
+        ]
+        indexes = [
+            GinIndex(fields=["title"], name="alt_show_title_trgm", opclasses=["gin_trgm_ops"]),
         ]
 
     def __str__(self):
@@ -163,6 +171,9 @@ class Movie(models.Model):
                 name="movie_has_provider_id",
             ),
         ]
+        indexes = [
+            GinIndex(fields=["primary_title"], name="movie_title_trgm", opclasses=["gin_trgm_ops"]),
+        ]
 
     def __str__(self):
         return self.primary_title
@@ -183,9 +194,30 @@ class AlternateMovieTitle(models.Model):
                 name="unique_alternate_movie_title",
             ),
         ]
+        indexes = [
+            GinIndex(fields=["title"], name="alt_movie_title_trgm", opclasses=["gin_trgm_ops"]),
+        ]
 
     def __str__(self):
         return self.title
+
+
+class SyncState(models.Model):
+    """
+    Durable progress markers for the sync tasks (spec §4.5) — e.g. the next
+    TVmaze index page for the Tier 1 seed, later the Tier 2 delta-sync
+    watermark. A dedicated table rather than something inferred from catalog
+    rows: Tier 3 on-demand fetches insert shows with arbitrary provider IDs,
+    so catalog contents say nothing about how far a seed walk actually got.
+    Deleting a row is safe — the task restarts from the beginning.
+    """
+
+    key = models.CharField(max_length=100, unique=True)
+    value = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key} = {self.value}"
 
 
 class ProviderCache(models.Model):

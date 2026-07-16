@@ -7,8 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Test tooling is opt-in so the production image stays lean; docker-compose
+# builds with INSTALL_DEV=true.
+ARG INSTALL_DEV=false
+RUN if [ "$INSTALL_DEV" = "true" ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
 COPY . .
 

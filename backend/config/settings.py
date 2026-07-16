@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "django.contrib.postgres",  # TrigramSimilarity for search (spec §4.6)
     # Third-party
     "rest_framework",
     "rest_framework_simplejwt",
@@ -112,6 +113,17 @@ CACHES = {
         "LOCATION": env("REDIS_URL", "redis://redis:6379/0"),
     }
 }
+
+# --- Celery (spec §5: background jobs for sync + notifications) -----------
+
+CELERY_BROKER_URL = env("REDIS_URL", "redis://redis:6379/0")
+CELERY_TASK_TIME_LIMIT = 60 * 60  # a full Tier 1 seed run is long but bounded
+
+# --- Providers (spec §4.1) -------------------------------------------------
+
+# v3 API key or v4 read access token. Empty = TMDB disabled: movies and
+# show enhancement (posters) are unavailable until it's set (§4.1).
+TMDB_API_KEY = env("TMDB_API_KEY", "")
 
 # --- Auth (spec §5: social login only, JWT via simplejwt) -----------------
 

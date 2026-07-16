@@ -1,0 +1,6 @@
+# Test/dev-only dependencies, on top of requirements.txt. Installed in the
+# image only when the INSTALL_DEV build arg is set (docker-compose does).
+-r requirements.txt
+pytest>=8.3,<9.0
+pytest-django>=4.9,<5.0
+responses>=0.25,<1.0
