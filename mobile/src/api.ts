@@ -12,8 +12,11 @@ export interface Profile {
 
 export type SubscriptionStatus = 'active' | 'paused';
 
+/** The two subscribable catalog entities, as used in subscription API paths. */
+export type EntityKind = 'show' | 'movie';
+
 export interface SearchResult {
-  type: 'show' | 'movie';
+  type: EntityKind;
   id: number;
   title: string;
   year: number | null;
@@ -164,9 +167,12 @@ export class Api {
       throw new ApiError(401, 'Session expired — please sign in again.');
     }
     if (!response.ok) {
+      // Include the body so backend validation errors are legible on-device,
+      // matching how loginWithGoogle surfaces failures.
+      const errorBody = await response.text();
       throw new ApiError(
         response.status,
-        `${method} ${path} failed (${response.status})`,
+        `${method} ${path} failed (${response.status})${errorBody ? `: ${errorBody}` : ''}`,
       );
     }
     if (response.status === 204) {
@@ -233,16 +239,16 @@ export class Api {
     return this.request(`/api/movies/${id}/watched/`, watched ? 'POST' : 'DELETE');
   }
 
-  subscribe(type: 'show' | 'movie', id: number): Promise<{ status: SubscriptionStatus }> {
+  subscribe(type: EntityKind, id: number): Promise<{ status: SubscriptionStatus }> {
     return this.request(`/api/${type}s/${id}/subscription/`, 'POST');
   }
 
-  unsubscribe(type: 'show' | 'movie', id: number): Promise<void> {
+  unsubscribe(type: EntityKind, id: number): Promise<void> {
     return this.request(`/api/${type}s/${id}/subscription/`, 'DELETE');
   }
 
   setSubscriptionStatus(
-    type: 'show' | 'movie',
+    type: EntityKind,
     id: number,
     status: SubscriptionStatus,
   ): Promise<{ status: SubscriptionStatus }> {

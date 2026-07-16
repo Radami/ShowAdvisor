@@ -12,11 +12,15 @@ function itemTitle(item: HistoryItem): string {
   if (item.type === 'movie') {
     return item.title;
   }
-  const episodeNumber =
-    item.episode_number != null
-      ? `S${item.season_number}E${item.episode_number}`
-      : `S${item.season_number} Special`;
-  return `${item.show_title} — ${episodeNumber}`;
+
+  // Build the "S2E5" / "S2 Special" code, tolerating a missing season or
+  // episode number rather than emitting "Sundefined".
+  const season = item.season_number != null ? `S${item.season_number}` : '';
+  const episode =
+    item.episode_number != null ? `E${item.episode_number}` : season ? ' Special' : '';
+  const code = `${season}${episode}`.trim();
+
+  return code ? `${item.show_title} — ${code}` : item.show_title ?? item.title;
 }
 
 /**
@@ -48,7 +52,11 @@ export default function HistoryScreen() {
     <FlatList
       style={styles.container}
       data={data.history}
-      keyExtractor={(item, index) => `${item.type}-${index}`}
+      keyExtractor={(item, index) => {
+        // Prefer the real row id; fall back to index only if it is absent.
+        const id = item.type === 'movie' ? item.movie_id : item.episode_id;
+        return `${item.type}-${id ?? index}`;
+      }}
       renderItem={({ item }) => (
         <Text style={styles.row} onPress={() => openItem(item)}>
           <Text style={styles.rowTitle}>{itemTitle(item)}</Text>

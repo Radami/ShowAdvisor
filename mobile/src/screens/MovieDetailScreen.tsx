@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,11 +9,14 @@ import {
 } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { useAuth } from '../auth';
-import { MovieDetail } from '../api';
 import { RootStackParamList } from '../navigation';
 import { colors } from '../theme';
-import { formatDate, useFocusedFetch } from '../hooks';
+import { formatDate, useOptimisticDetail } from '../hooks';
 import PosterImage from '../components/PosterImage';
+import SubscriptionActions from '../components/SubscriptionActions';
+
+// The movie has a single watched toggle; one key de-dupes rapid taps on it.
+const WATCHED_KEY = 'watched';
 
 /**
  * Movie detail screen (spec §3.1): poster/info header, subscribe/pause
@@ -23,50 +26,19 @@ export default function MovieDetailScreen() {
   const { api } = useAuth();
   const route = useRoute<RouteProp<RootStackParamList, 'MovieDetail'>>();
   const { movieId } = route.params;
-  const [busy, setBusy] = useState(false);
 
   const fetcher = useCallback(() => api.getMovie(movieId), [api, movieId]);
-  const { data, error, reload } = useFocusedFetch(fetcher);
-  const [local, setLocal] = useState<MovieDetail | null>(null);
-  const movie = local ?? data;
-
-  const mutate = async (
-    optimistic: (current: MovieDetail) => MovieDetail,
-    call: () => Promise<unknown>,
-  ) => {
-    if (!movie || busy) {
-      return;
-    }
-    setLocal(optimistic(movie));
-    setBusy(true);
-    try {
-      await call();
-    } catch {
-      setLocal(null);
-      reload();
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { data: movie, error, mutate, setSubscription } = useOptimisticDetail(
+    'movie',
+    movieId,
+    fetcher,
+  );
 
   const toggleWatched = () =>
     mutate(
+      WATCHED_KEY,
       current => ({ ...current, watched: !current.watched }),
       () => api.setMovieWatched(movieId, !movie?.watched),
-    );
-
-  const setSubscription = (subscription: MovieDetail['subscription']) =>
-    mutate(
-      current => ({ ...current, subscription }),
-      () => {
-        if (!subscription) {
-          return api.unsubscribe('movie', movieId);
-        }
-        if (!movie?.subscription) {
-          return api.subscribe('movie', movieId);
-        }
-        return api.setSubscriptionStatus('movie', movieId, subscription.status);
-      },
     );
 
   if (error) {
@@ -110,28 +82,7 @@ export default function MovieDetailScreen() {
       </Pressable>
 
       <View style={styles.actions}>
-        {!movie.subscription ? (
-          <Pressable style={styles.button} onPress={() => setSubscription({ status: 'active' })}>
-            <Text style={styles.buttonText}>Subscribe</Text>
-          </Pressable>
-        ) : (
-          <>
-            <Pressable
-              style={styles.button}
-              onPress={() =>
-                setSubscription({
-                  status: movie.subscription?.status === 'paused' ? 'active' : 'paused',
-                })
-              }>
-              <Text style={styles.buttonText}>
-                {movie.subscription.status === 'paused' ? 'Resume' : 'Pause'}
-              </Text>
-            </Pressable>
-            <Pressable style={styles.button} onPress={() => setSubscription(null)}>
-              <Text style={styles.buttonText}>Unsubscribe</Text>
-            </Pressable>
-          </>
-        )}
+        <SubscriptionActions subscription={movie.subscription} onChange={setSubscription} />
       </View>
 
       {movie.summary ? <Text style={styles.summary}>{movie.summary}</Text> : null}
@@ -193,17 +144,6 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: 8,
-  },
-  button: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-  },
-  buttonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
   },
   summary: {
     fontSize: 14,

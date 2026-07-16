@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,11 +9,16 @@ import {
 } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { useAuth } from '../auth';
-import { EpisodeDetail, ShowDetail } from '../api';
+import { EpisodeDetail } from '../api';
 import { RootStackParamList } from '../navigation';
 import { colors } from '../theme';
-import { formatDate, useFocusedFetch } from '../hooks';
+import { formatDate, useOptimisticDetail } from '../hooks';
 import PosterImage from '../components/PosterImage';
+import SubscriptionActions from '../components/SubscriptionActions';
+
+// Per-target keys so an episode and its season de-dupe independently.
+const episodeKey = (id: number) => `episode-${id}`;
+const seasonKey = (id: number) => `season-${id}`;
 
 /**
  * Show detail screen (spec §3.1): poster/info header, subscribe/pause
@@ -24,35 +29,17 @@ export default function ShowDetailScreen() {
   const { api } = useAuth();
   const route = useRoute<RouteProp<RootStackParamList, 'ShowDetail'>>();
   const { showId } = route.params;
-  const [busy, setBusy] = useState(false);
 
   const fetcher = useCallback(() => api.getShow(showId), [api, showId]);
-  const { data, error, reload } = useFocusedFetch(fetcher);
-  const [local, setLocal] = useState<ShowDetail | null>(null);
-  // `local` shadows fetched data for optimistic watched-toggle updates.
-  const show = local ?? data;
-
-  const mutate = async (
-    optimistic: (current: ShowDetail) => ShowDetail,
-    call: () => Promise<unknown>,
-  ) => {
-    if (!show || busy) {
-      return;
-    }
-    setLocal(optimistic(show));
-    setBusy(true);
-    try {
-      await call();
-    } catch {
-      setLocal(null);
-      reload(); // roll back to server truth
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { data: show, error, mutate, setSubscription } = useOptimisticDetail(
+    'show',
+    showId,
+    fetcher,
+  );
 
   const toggleEpisode = (episode: EpisodeDetail) =>
     mutate(
+      episodeKey(episode.id),
       current => ({
         ...current,
         seasons: current.seasons.map(season => ({
@@ -67,6 +54,7 @@ export default function ShowDetailScreen() {
 
   const toggleSeason = (seasonId: number, watched: boolean) =>
     mutate(
+      seasonKey(seasonId),
       current => ({
         ...current,
         seasons: current.seasons.map(season =>
@@ -76,20 +64,6 @@ export default function ShowDetailScreen() {
         ),
       }),
       () => api.setSeasonWatched(seasonId, watched),
-    );
-
-  const setSubscription = (subscription: ShowDetail['subscription']) =>
-    mutate(
-      current => ({ ...current, subscription }),
-      () => {
-        if (!subscription) {
-          return api.unsubscribe('show', showId);
-        }
-        if (!show?.subscription) {
-          return api.subscribe('show', showId);
-        }
-        return api.setSubscriptionStatus('show', showId, subscription.status);
-      },
     );
 
   if (error) {
@@ -126,26 +100,10 @@ export default function ShowDetailScreen() {
                 {[yearRange, show.status, show.network].filter(Boolean).join(' · ')}
               </Text>
               <View style={styles.actions}>
-                {!show.subscription ? (
-                  <ActionButton
-                    label="Subscribe"
-                    primary
-                    onPress={() => setSubscription({ status: 'active' })}
-                  />
-                ) : (
-                  <>
-                    <ActionButton
-                      label={show.subscription.status === 'paused' ? 'Resume' : 'Pause'}
-                      onPress={() =>
-                        setSubscription({
-                          status:
-                            show.subscription?.status === 'paused' ? 'active' : 'paused',
-                        })
-                      }
-                    />
-                    <ActionButton label="Unsubscribe" onPress={() => setSubscription(null)} />
-                  </>
-                )}
+                <SubscriptionActions
+                  subscription={show.subscription}
+                  onChange={setSubscription}
+                />
               </View>
             </View>
           </View>
@@ -188,22 +146,6 @@ export default function ShowDetailScreen() {
   );
 }
 
-function ActionButton({
-  label,
-  onPress,
-  primary,
-}: {
-  label: string;
-  onPress: () => void;
-  primary?: boolean;
-}) {
-  return (
-    <Pressable style={[styles.button, primary && styles.buttonPrimary]} onPress={onPress}>
-      <Text style={[styles.buttonText, primary && styles.buttonTextPrimary]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -243,23 +185,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     flexWrap: 'wrap',
-  },
-  button: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-  },
-  buttonPrimary: {
-    backgroundColor: colors.accent,
-  },
-  buttonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  buttonTextPrimary: {
-    color: '#fff',
   },
   summary: {
     fontSize: 14,
