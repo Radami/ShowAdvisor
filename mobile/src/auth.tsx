@@ -13,7 +13,9 @@ interface AuthContextValue {
   signOut: () => void;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+// Exported so tests can mount screens against a mock Api without standing up
+// the real provider (which would require a live Google session and network).
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
  * Re-establish an expired session without UI, using the provider the user
