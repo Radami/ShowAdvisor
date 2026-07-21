@@ -14,6 +14,12 @@ db.sqlite3
 .mypy_cache/
 .ruff_cache/
 
+# Coverage (pytest-cov; mobile/coverage is handled by mobile/.gitignore)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Node / React Native
 mobile/node_modules/
 mobile/.bundle/
